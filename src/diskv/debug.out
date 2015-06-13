@@ -1,0 +1,39 @@
+Test: Basic Join/Leave (lab4) ...
+  ... Passed
+Test: Shards really move (lab4) ...
+  ... Passed
+Test: Reconfiguration with some dead replicas (lab4) ...
+  ... Passed
+Test: Concurrent Put/Get/Move (lab4) ...
+  ... Passed
+Test: Concurrent Put/Get/Move (unreliable) (lab4) ...
+unexpected EOF
+write unix /var/tmp/824-0/lab5-concurrent-true/kMh9Wris_eHp: broken pipe
+read unix /var/tmp/824-0/lab5-concurrent-true/X_DpmKiwsCNP: connection reset by peer
+write unix /var/tmp/824-0/lab5-concurrent-true/swkeFeVA-Ozu: broken pipe
+unexpected EOF
+unexpected EOF
+write unix /var/tmp/824-0/lab5-concurrent-true/V1R4mmycNFTC: broken pipe
+write unix /var/tmp/824-0/lab5-concurrent-true/9dupXBCpe0IT: broken pipe
+unexpected EOF
+unexpected EOF
+unexpected EOF
+write unix /var/tmp/824-0/lab5-concurrent-true/sYJF4LqFj7KK: broken pipe
+write unix /var/tmp/824-0/lab5-concurrent-true/kMh9Wris_eHp: broken pipe
+unexpected EOF
+unexpected EOF
+unexpected EOF
+unexpected EOF
+unexpected EOF
+write unix /var/tmp/824-0/lab5-concurrent-true/fYVEjjFEBgVB: broken pipe
+unexpected EOF
+write unix /var/tmp/824-0/lab5-concurrent-true/9dupXBCpe0IT: broken pipe
+unexpected EOF
+read unix /var/tmp/824-0/lab5-concurrent-true/X_DpmKiwsCNP: connection reset by peer
+unexpected EOF
+--- FAIL: Test4ConcurrentUnreliable (1.71s)
+	test_test.go:445: Get(1) expected 6100275367158842890 got 61002753671588428906100275367158842890
+	test_test.go:445: Get(10) expected 6627273654189079311 got 66272736541890793116627273654189079311
+	test_test.go:445: Get(9) expected 3849151503115641777 got 38491515031156417773849151503115641777
+	test_test.go:460: something is wrong
+Test: Basic Persistence ...
