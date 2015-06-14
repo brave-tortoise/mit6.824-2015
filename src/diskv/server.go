@@ -16,6 +16,7 @@ import "math/rand"
 import "shardmaster"
 import "io/ioutil"
 import "strconv"
+import "bytes"
 
 
 const Debug = 0
@@ -158,6 +159,142 @@ func (kv *DisKV) fileReplaceShard(shard int, m map[string]string) {
 	}
 }
 
+func (kv *DisKV) encodeConfig(config shardmaster.Config) string {
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(config)
+	return string(w.Bytes())
+}
+
+func (kv *DisKV) decodeConfig(buf string) shardmaster.Config {
+	r := bytes.NewBuffer([]byte(buf))
+	d := gob.NewDecoder(r)
+	var config shardmaster.Config
+	d.Decode(&config)
+	return config
+}
+
+func (kv *DisKV) fileWriteConfig(config shardmaster.Config) error {
+	content := kv.encodeConfig(config)
+	fullname := kv.dir + "/config"
+	tempname := kv.dir + "/temp-config"
+	if err := ioutil.WriteFile(tempname, []byte(content), 0666); err != nil {
+		return err
+	}
+	if err := os.Rename(tempname, fullname); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (kv *DisKV) fileReadConfig() shardmaster.Config {
+	config := shardmaster.Config{}
+	fullname := kv.dir + "/config"
+	content, err := ioutil.ReadFile(fullname)
+	if err == nil {
+		config = kv.decodeConfig(string(content))
+	}
+	return config
+}
+
+func (kv *DisKV) fileWriteSeq(seq int) error {
+	content := strconv.Itoa(seq)
+	fullname := kv.dir + "/seq"
+	tempname := kv.dir + "/temp-seq"
+	if err := ioutil.WriteFile(tempname, []byte(content), 0666); err != nil {
+		return err
+	}
+	if err := os.Rename(tempname, fullname); err != nil {
+		return err
+	}
+	return nil
+
+}
+
+func (kv *DisKV) fileReadSeq() int {
+	seq := 0
+	fullname := kv.dir + "/seq"
+	content, err := ioutil.ReadFile(fullname)
+	if err == nil {
+		seq, _ = strconv.Atoi(string(content))
+	}
+	return seq
+}
+
+func (kv *DisKV) recOpsDir() string {
+	d := kv.dir + "/recOps/"
+	// create directory if needed.
+	_, err := os.Stat(d)
+	if err != nil {
+		if err := os.Mkdir(d, 0777); err != nil {
+			log.Fatalf("Mkdir(%v): %v", d, err)
+		}
+	}
+	return d
+}
+
+func (kv *DisKV) encodeRecOps(lastOp LastOp) string {
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(lastOp)
+	return string(w.Bytes())
+}
+
+func (kv *DisKV) decodeRecOps(buf string) LastOp {
+	r := bytes.NewBuffer([]byte(buf))
+	d := gob.NewDecoder(r)
+	var lastOp LastOp
+	d.Decode(&lastOp)
+	return lastOp
+}
+
+func (kv *DisKV) fileWriteLastOp(client int64, lastOp LastOp) error {
+	fullname := kv.recOpsDir() + "/client-" + strconv.FormatInt(client, 10)
+	tempname := kv.recOpsDir() + "/temp-" + strconv.FormatInt(client, 10)
+	content := kv.encodeRecOps(lastOp)
+	if err := ioutil.WriteFile(tempname, []byte(content), 0666); err != nil {
+		return err
+	}
+	if err := os.Rename(tempname, fullname); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (kv *DisKV) fileReadLastOp(client int64) (LastOp, error) {
+	lastOp := LastOp{}
+	fullname := kv.recOpsDir() + "/client-" + strconv.FormatInt(client, 10)
+	content, err := ioutil.ReadFile(fullname)
+	if err == nil {
+		lastOp = kv.decodeRecOps(string(content))
+	}
+	return lastOp, err
+}
+
+func (kv *DisKV) fileReadRecOps() map[int64]LastOp {
+	recOps := map[int64]LastOp{}
+	d := kv.recOpsDir()
+	files, err := ioutil.ReadDir(d)
+	if err != nil {
+		log.Fatalf("fileReadRecOps could not read %v: %v", d, err)
+	}
+	for _, fi := range files {
+		n1 := fi.Name()
+		if n1[0:7] == "client-" {
+			client, err := strconv.ParseInt(n1[7:], 10, 0)
+			if err != nil {
+				log.Fatalf("fileReadRecOps bad file name %v: %v", n1, err)
+			}
+			lastOp, err := kv.fileReadLastOp(client)
+			if err != nil {
+				log.Fatalf("fileReadRecOps fileReadLastOp failed for %v: %v", client, err)
+			}
+			recOps[client] = lastOp
+		}
+	}
+	return recOps
+}
+
 func (kv *DisKV) WaitForDecide(seq int) Op {
 	to := 10 * time.Millisecond
 	for {
@@ -202,44 +339,54 @@ func (kv *DisKV) Propose(op Op) Err {
 
 		if decidedOp.OpType == "Reconfig" {
 			for shard, data := range decidedOp.GetShards {
-				//kv.fileReplaceShard(shard, data)
 				for k, v := range data {
 					kv.database[shard][k] = v
 				}
+				kv.fileReplaceShard(shard, data)
 			}
 
 			for client, lastOp := range decidedOp.GetRecOps {
 				lo, ok := kv.recOps[client]
 				if !ok || lastOp.OpSeq > lo.OpSeq {
 					kv.recOps[client] = lastOp
+					kv.fileWriteLastOp(client, lastOp)
 				}
 			}
 
 			kv.config = decidedOp.Config
+			kv.fileWriteConfig(kv.config)
+
 		} else {
-			opType, shard, key, value := decidedOp.OpType, decidedOp.Shard, decidedOp.Key, decidedOp.Value
+
+			opType, client, shard, key := decidedOp.OpType, decidedOp.Client, decidedOp.Shard, decidedOp.Key
 			err = OK
 			lastOp := LastOp{OpSeq:decidedOp.OpSeq}
 
-			if opType == "Put" {
-				kv.database[shard][key] = value
-			} else if opType == "Append" {
-				kv.database[shard][key] = kv.database[shard][key] + value
-			} else {
+			if opType == "Get" {
 				if v, ok := kv.database[shard][key]; ok {
 					lastOp.Value = v
 				} else {
 					err = ErrNoKey
 				}
+			} else {
+				value := decidedOp.Value
+				if opType == "Append" {
+					value = kv.database[shard][key] + value
+				}
+				kv.database[shard][key] = value
+				kv.filePut(shard, key, value)
 			}
 
 			if err == OK {
-				kv.recOps[decidedOp.Client] = lastOp
+				kv.recOps[client] = lastOp
+				kv.fileWriteLastOp(client, lastOp)
 			}
 		}
 
 		kv.px.Done(seq)
 		kv.seq++
+		kv.fileWriteSeq(kv.seq)
+
 		if decidedOp.OpId == op.OpId {
 			break
 		}
@@ -404,13 +551,17 @@ func StartServer(gid int64, shardmasters []string,
 	for i := 0; i < shardmaster.NShards; i++ {
 		kv.database[i] = make(map[string]string)
 	}
+	kv.config = shardmaster.Config{}
 	kv.seq = 0
 	kv.recOps = make(map[int64]LastOp)
-	kv.config = shardmaster.Config{}
 
 	if restart {
-		//read file to update mem
-
+		for i := 0; i < shardmaster.NShards; i++ {
+			kv.database[i] = kv.fileReadShard(i)
+		}
+		kv.config = kv.fileReadConfig()
+		kv.seq = kv.fileReadSeq()
+		kv.recOps = kv.fileReadRecOps()
 	}
 
 
