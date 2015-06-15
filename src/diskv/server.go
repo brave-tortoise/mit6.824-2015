@@ -208,7 +208,6 @@ func (kv *DisKV) fileWriteSeq(seq int) error {
 		return err
 	}
 	return nil
-
 }
 
 func (kv *DisKV) fileReadSeq() int {
@@ -314,7 +313,8 @@ func (kv *DisKV) Propose(op Op) Err {
 	var err Err
 
 	for {
-		if op.OpType == "Reconfig" {
+		if op.OpType == "NullOp" {
+		} else if op.OpType == "Reconfig" {
 			if op.Config.Num <= kv.config.Num {
 				return OK
 			}
@@ -337,7 +337,8 @@ func (kv *DisKV) Propose(op Op) Err {
 		}
 		decidedOp := decidedV.(Op)
 
-		if decidedOp.OpType == "Reconfig" {
+		if decidedOp.OpType == "NullOp" {
+		} else if decidedOp.OpType == "Reconfig" {
 			for shard, data := range decidedOp.GetShards {
 				for k, v := range data {
 					kv.database[shard][k] = v
@@ -385,6 +386,7 @@ func (kv *DisKV) Propose(op Op) Err {
 
 		kv.px.Done(seq)
 		kv.seq++
+		fmt.Printf("%d, %d\n", kv.me, kv.seq)
 		kv.fileWriteSeq(kv.seq)
 
 		if decidedOp.OpId == op.OpId {
@@ -548,22 +550,6 @@ func StartServer(gid int64, shardmasters []string,
 	// Your initialization code here.
 	// Don't call Join().
 	kv.database = make([]map[string]string, shardmaster.NShards)
-	for i := 0; i < shardmaster.NShards; i++ {
-		kv.database[i] = make(map[string]string)
-	}
-	kv.config = shardmaster.Config{}
-	kv.seq = 0
-	kv.recOps = make(map[int64]LastOp)
-
-	if restart {
-		for i := 0; i < shardmaster.NShards; i++ {
-			kv.database[i] = kv.fileReadShard(i)
-		}
-		kv.config = kv.fileReadConfig()
-		kv.seq = kv.fileReadSeq()
-		kv.recOps = kv.fileReadRecOps()
-	}
-
 
 	// log.SetOutput(ioutil.Discard)
 
@@ -576,6 +562,25 @@ func StartServer(gid int64, shardmasters []string,
 
 	// log.SetOutput(os.Stdout)
 
+	if restart {
+		for i := 0; i < shardmaster.NShards; i++ {
+			kv.database[i] = kv.fileReadShard(i)
+		}
+		kv.config = kv.fileReadConfig()
+		kv.seq = kv.fileReadSeq()
+		fmt.Printf("read: %d, %d\n", kv.me, kv.seq)
+		kv.recOps = kv.fileReadRecOps()
+
+		op := Op{OpId:nrand(), OpType:"NullOp"}
+		kv.Propose(op)
+	} else {
+		for i := 0; i < shardmaster.NShards; i++ {
+			kv.database[i] = make(map[string]string)
+		}
+		kv.config = shardmaster.Config{}
+		kv.seq = 0
+		kv.recOps = make(map[int64]LastOp)
+	}
 
 
 	os.Remove(servers[me])

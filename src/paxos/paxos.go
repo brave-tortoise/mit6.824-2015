@@ -114,6 +114,20 @@ func (px *Paxos) myMin() int {
 	return minDone + 1
 }
 
+func (px *Paxos) fileWriteInstance(seq int, acceptP *AcceptorState) error {
+
+}
+
+func (px *Paxos) fileReadInsts() map[int]*AcceptorState {
+
+
+}
+
+
+
+
+
+
 func (px *Paxos) Proposer(seq int, v interface{}) {
 
 	for !px.isdead() {
@@ -470,6 +484,11 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 		px.doneInsts[i] = -1
 	}
 	px.pnums = make(map[int]int)
+
+	//restart & read
+	px.instances = px.fileReadInsts()
+	px.doneInsts = px.fileReadDone(len(peers))
+	px.pnums = px.fileReadPnums()
 
 
 	if rpcs != nil {

@@ -1,28 +1,10 @@
 Test: Basic Persistence ...
-  ... Passed
-Test: One server restarts ...
-  ... Passed
-Test: Servers don't use too much disk space ...
-  ... Passed
-Test: Servers don't use too much disk space for Appends ...
-  ... Passed
-Test: One server loses disk and restarts ...
-  ... Passed
-Test: One server down, another loses disk ...
---- FAIL: Test5OneLostOneDown (15.71s)
-	test_test.go:953: wrong value for k1
-Test: Concurrent Append and Crash ...
---- FAIL: Test5ConcurrentCrashReliable (27.56s)
-	test_test.go:972: missing element 0 0 in Append result
-Test: Simultaneous Append and Crash ...
---- FAIL: Test5Simultaneous (8.80s)
-	test_test.go:972: missing element 0 0 in Append result
-Test: replica waits correctly after disk loss ...
---- FAIL: Test5RejoinMix1 (2.66s)
-	test_test.go:1192: Get should not have succeeded.
-Test: replica Paxos resumes correctly after disk loss ...
---- FAIL: Test5RejoinMix3 (3.00s)
-	test_test.go:1275: wrong value
-FAIL
-exit status 1
-FAIL	diskv	104.729s
+1, 1
+0, 1
+2, 1
+0, 2
+0, 3
+0, 4
+read: 0, 4
+read: 2, 1
+read: 1, 1
