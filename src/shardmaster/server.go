@@ -375,7 +375,7 @@ func StartServer(servers []string, me int) *ShardMaster {
 
 	gob.Register(Op{})
 	rpcs.Register(sm)
-	sm.px = paxos.Make(servers, me, rpcs)
+	sm.px = paxos.Make(servers, me, rpcs, "", false)
 
 	os.Remove(servers[me])
 	l, e := net.Listen("unix", servers[me])

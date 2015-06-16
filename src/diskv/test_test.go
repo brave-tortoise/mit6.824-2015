@@ -12,7 +12,7 @@ import "fmt"
 //import "sync"
 import "io/ioutil"
 import "log"
-//import "math/rand"
+import "math/rand"
 import crand "crypto/rand"
 import "encoding/base64"
 import "path/filepath"
@@ -535,7 +535,7 @@ func Test5BasicPersistence(t *testing.T) {
 
 	fmt.Printf("  ... Passed\n")
 }
-/*
+
 //
 // if server S1 is dead for a bit, and others accept operations,
 // do they bring S1 up to date correctly after it restarts?
@@ -898,7 +898,7 @@ func Test5OneLostOneDown(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	ck.Get(k2)
 
-	fmt.Println(k1v)
+	//fmt.Println(k1v)
 
 	tc.kill1(0, 0, false)
 
@@ -962,7 +962,7 @@ func Test5OneLostOneDown(t *testing.T) {
 
 	fmt.Printf("  ... Passed\n")
 }
-*/
+
 /*
 // check that all known appends are present in a value,
 // and are in order for each concurrent client.

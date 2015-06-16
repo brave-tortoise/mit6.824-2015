@@ -1,10 +1,17 @@
 Test: Basic Persistence ...
-1, 1
-0, 1
-2, 1
-0, 2
-0, 3
-0, 4
-read: 0, 4
-read: 2, 1
-read: 1, 1
+  ... Passed
+Test: One server restarts ...
+  ... Passed
+Test: Servers don't use too much disk space ...
+--- FAIL: Test5DiskUse (7.94s)
+	test_test.go:652: using too many bytes on disk (908860)
+Test: Servers don't use too much disk space for Appends ...
+--- FAIL: Test5AppendUse (8.06s)
+	test_test.go:749: using too many bytes on disk (1331937 > 353000)
+Test: One server loses disk and restarts ...
+  ... Passed
+Test: One server down, another loses disk ...
+  ... Passed
+FAIL
+exit status 1
+FAIL	diskv	59.939s

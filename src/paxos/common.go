@@ -6,9 +6,11 @@ type Proposal struct {
 }
 
 type AcceptorState struct {
-	maxPrepare	int
-	acceptP		Proposal
-	decided		Fate
+	MaxPrepare	int
+	AcceptP		Proposal
+	//Num			int
+	//Value		interface{}
+	Decided		Fate
 }
 
 type AcceptorArgs struct {
@@ -30,5 +32,4 @@ type LearnerArgs struct {
 }
 
 type LearnerReply struct {
-	//Done		int
 }

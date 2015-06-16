@@ -67,6 +67,7 @@ type DisKV struct {
 	seq			int
 	recOps		map[int64]LastOp	//client, LastOp
 	config		shardmaster.Config
+	restart		bool
 }
 
 //
@@ -251,6 +252,7 @@ func (kv *DisKV) fileWriteLastOp(client int64, lastOp LastOp) error {
 	fullname := kv.recOpsDir() + "/client-" + strconv.FormatInt(client, 10)
 	tempname := kv.recOpsDir() + "/temp-" + strconv.FormatInt(client, 10)
 	content := kv.encodeRecOps(lastOp)
+	//fmt.Println("content: ", content)
 	if err := ioutil.WriteFile(tempname, []byte(content), 0666); err != nil {
 		return err
 	}
@@ -329,6 +331,8 @@ func (kv *DisKV) Propose(op Op) Err {
 			}
 		}
 
+		//fmt.Printf("%d, %d\n", kv.me, kv.seq)
+
 		seq := kv.seq
 		state, decidedV := kv.px.Status(seq)
 		if state != paxos.Decided {
@@ -336,6 +340,7 @@ func (kv *DisKV) Propose(op Op) Err {
 			decidedV = kv.WaitForDecide(seq)
 		}
 		decidedOp := decidedV.(Op)
+
 
 		if decidedOp.OpType == "NullOp" {
 		} else if decidedOp.OpType == "Reconfig" {
@@ -357,6 +362,8 @@ func (kv *DisKV) Propose(op Op) Err {
 			kv.config = decidedOp.Config
 			kv.fileWriteConfig(kv.config)
 
+			//fmt.Printf("%d: %d, %s, %d, %d\n", kv.me, kv.seq, decidedOp.OpType, len(decidedOp.GetShards), len(decidedOp.GetRecOps))
+
 		} else {
 
 			opType, client, shard, key := decidedOp.OpType, decidedOp.Client, decidedOp.Shard, decidedOp.Key
@@ -373,6 +380,7 @@ func (kv *DisKV) Propose(op Op) Err {
 				value := decidedOp.Value
 				if opType == "Append" {
 					value = kv.database[shard][key] + value
+					//fmt.Printf("%d: %d, %s, %d, %s, %d, %s\n", kv.me, kv.seq, opType, client, key, shard, value)
 				}
 				kv.database[shard][key] = value
 				kv.filePut(shard, key, value)
@@ -382,11 +390,11 @@ func (kv *DisKV) Propose(op Op) Err {
 				kv.recOps[client] = lastOp
 				kv.fileWriteLastOp(client, lastOp)
 			}
+
 		}
 
 		kv.px.Done(seq)
 		kv.seq++
-		fmt.Printf("%d, %d\n", kv.me, kv.seq)
 		kv.fileWriteSeq(kv.seq)
 
 		if decidedOp.OpId == op.OpId {
@@ -490,6 +498,12 @@ func (kv *DisKV) tick() {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
+	if kv.restart {
+		op := Op{OpId:nrand(), OpType:"NullOp"}
+		kv.Propose(op)
+		kv.restart = false
+	}
+
 	cfgNum := kv.config.Num
 	newCfg := kv.sm.Query(cfgNum + 1)
 
@@ -558,7 +572,7 @@ func StartServer(gid int64, shardmasters []string,
 	rpcs := rpc.NewServer()
 	rpcs.Register(kv)
 
-	kv.px = paxos.Make(servers, me, rpcs)
+	kv.px = paxos.Make(servers, me, rpcs, dir, restart)
 
 	// log.SetOutput(os.Stdout)
 
@@ -568,11 +582,13 @@ func StartServer(gid int64, shardmasters []string,
 		}
 		kv.config = kv.fileReadConfig()
 		kv.seq = kv.fileReadSeq()
-		fmt.Printf("read: %d, %d\n", kv.me, kv.seq)
+		//fmt.Printf("read: %d, %d\n", kv.me, kv.seq)
 		kv.recOps = kv.fileReadRecOps()
-
-		op := Op{OpId:nrand(), OpType:"NullOp"}
-		kv.Propose(op)
+		kv.restart = true
+		//go func() {
+		//	op := Op{OpId:nrand(), OpType:"NullOp"}
+		//	kv.Propose(op)
+		//}()
 	} else {
 		for i := 0; i < shardmaster.NShards; i++ {
 			kv.database[i] = make(map[string]string)
@@ -580,6 +596,7 @@ func StartServer(gid int64, shardmasters []string,
 		kv.config = shardmaster.Config{}
 		kv.seq = 0
 		kv.recOps = make(map[int64]LastOp)
+		kv.restart = false
 	}
 
 

@@ -31,9 +31,13 @@ import "sync/atomic"
 import "fmt"
 import "math/rand"
 
-//import "time"
-//import "strconv"
 import "errors"
+import "strconv"
+import "encoding/gob"
+import "bytes"
+import "io/ioutil"
+//import "unsafe"
+
 
 // px.Status() return values, indicating
 // whether an agreement has been decided,
@@ -61,6 +65,7 @@ type Paxos struct {
 	instances	map[int]*AcceptorState	//seq, {maxPrepare, acceptP, decided}
 	doneInsts	[]int
 	pnums		map[int]int	//seq, proposal number
+	dir			string
 }
 
 
@@ -114,19 +119,228 @@ func (px *Paxos) myMin() int {
 	return minDone + 1
 }
 
-func (px *Paxos) fileWriteInstance(seq int, acceptP *AcceptorState) error {
+func (px *Paxos) instanceDir() string {
+	d := px.dir + "/instances/"
+	// create directory if needed
+	_, err := os.Stat(d)
+	if err != nil {
+		if err := os.Mkdir(d, 0777); err != nil {
+			log.Fatalf("Mkdir(%v): %v", d, err)
+		}
+	}
+	return d
+}
 
+func (px *Paxos) encodeAcceptP(acceptP AcceptorState) string {
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	/*fmt.Println("1connection pointer is", acceptP)
+	strPointerInt := fmt.Sprintf("%d", unsafe.Pointer(acceptP))
+	fmt.Printf("1int: %s\n", strPointerInt)
+	strPointerHex := fmt.Sprintf("%p", unsafe.Pointer(acceptP))
+    fmt.Println("1connection is", strPointerHex)
+	e.Encode(strPointerInt)*/
+	e.Encode(acceptP)
+	return string(w.Bytes())
+}
+
+func (px *Paxos) decodeAcceptP(buf string) AcceptorState {
+	r := bytes.NewBuffer([]byte(buf))
+	d := gob.NewDecoder(r)
+	//var acceptP *AcceptorState
+	/*var strPointerInt string
+	d.Decode(&strPointerInt)
+	fmt.Printf("2int: %s\n", strPointerInt)
+	i, _ := strconv.ParseInt(strPointerInt, 10, 0)
+	var acceptP *AcceptorState
+	acceptP = *(**AcceptorState)(unsafe.Pointer(&i))
+	fmt.Println("2connection pointer is", acceptP)
+	debugMsg := fmt.Sprintf("%p", unsafe.Pointer(acceptP))
+    fmt.Println("debugMsg is", debugMsg)*/
+	var acceptP AcceptorState
+	d.Decode(&acceptP)
+	return acceptP
+}
+
+func (px *Paxos) fileWriteInstance(seq int) error {
+	if px.dir == "" {
+		return nil
+	}
+	fullname := px.instanceDir() + "/seq-" + strconv.Itoa(seq)
+	tempname := px.instanceDir() + "/temp-" + strconv.Itoa(seq)
+	content := px.encodeAcceptP(*px.instances[seq])
+	//fmt.Println("content: ", content)
+	if err := ioutil.WriteFile(tempname, []byte(content), 0666); err != nil {
+		return err
+	}
+	if err := os.Rename(tempname, fullname); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (px *Paxos) fileReadInstance(seq int) (AcceptorState, error) {
+	acceptP := AcceptorState{}
+	fullname := px.instanceDir() + "/seq-" + strconv.Itoa(seq)
+	content, err := ioutil.ReadFile(fullname)
+	if err == nil {
+		acceptP = px.decodeAcceptP(string(content))
+	}
+	return acceptP, err
 }
 
 func (px *Paxos) fileReadInsts() map[int]*AcceptorState {
-
-
+	instances := map[int]*AcceptorState{}
+	d := px.instanceDir()
+	files, err := ioutil.ReadDir(d)
+	if err != nil {
+		log.Fatalf("fileReadInsts could not read %v: %v", d, err)
+	}
+	for _, fi := range files {
+		n1 := fi.Name()
+		if n1[0:4] == "seq-" {
+			seq, err := strconv.Atoi(n1[4:])
+			if err != nil {
+				log.Fatalf("fileReadInsts bad file name %v: %v", n1, err)
+			}
+			acceptP, err := px.fileReadInstance(seq)
+			if err != nil {
+				log.Fatalf("fileReadInsts fileReadInstance failed for %v: %v", seq, err)
+			}
+			instances[seq] = &acceptP
+			//fmt.Println(acceptP)
+		}
+	}
+	return instances
 }
 
+func (px *Paxos) doneDir() string {
+	d := px.dir + "/dones/"
+	// create directory if needed
+	_, err := os.Stat(d)
+	if err != nil {
+		if err := os.Mkdir(d, 0777); err != nil {
+			log.Fatalf("Mkdir(%v): %v", d, err)
+		}
+	}
+	return d
+}
 
+func (px *Paxos) fileWriteDone(me int, done int) error {
+	if px.dir == "" {
+		return nil
+	}
+	fullname := px.doneDir() + "/me-" + strconv.Itoa(me)
+	tempname := px.doneDir() + "/temp-" + strconv.Itoa(me)
+	content := strconv.Itoa(done)
+	if err := ioutil.WriteFile(tempname, []byte(content), 0666); err != nil {
+		return err
+	}
+	if err := os.Rename(tempname, fullname); err != nil {
+		return err
+	}
+	return nil
+}
 
+func (px *Paxos) fileReadDone(me int) (int, error) {
+	done := -1
+	fullname := px.doneDir() + "/me-" + strconv.Itoa(me)
+	content, err := ioutil.ReadFile(fullname)
+	if err == nil {
+		done, _ = strconv.Atoi(string(content))
+	}
+	return done, err
+}
 
+func (px *Paxos) fileReadDones(num int) []int {
+	doneInsts := make([]int, num)
+	for i := 0; i < num; i++ {
+		doneInsts[i] = -1
+	}
+	//instances := map[int]*AcceptorState{}
+	d := px.doneDir()
+	files, err := ioutil.ReadDir(d)
+	if err != nil {
+		log.Fatalf("fileReadDones could not read %v: %v", d, err)
+	}
+	for _, fi := range files {
+		n1 := fi.Name()
+		if n1[0:3] == "me-" {
+			me, err := strconv.Atoi(n1[3:])
+			if err != nil {
+				log.Fatalf("fileReadDones bad file name %v: %v", n1, err)
+			}
+			done, err := px.fileReadDone(me)
+			if err != nil {
+				log.Fatalf("fileReadDones fileReadDone failed for %v: %v", me, err)
+			}
+			doneInsts[me] = done
+		}
+	}
+	return doneInsts
+}
 
+func (px *Paxos) pnumDir() string {
+	d := px.dir + "/pnums/"
+	// create directory if needed
+	_, err := os.Stat(d)
+	if err != nil {
+		if err := os.Mkdir(d, 0777); err != nil {
+			log.Fatalf("Mkdir(%v): %v", d, err)
+		}
+	}
+	return d
+}
+
+func (px *Paxos) fileWritePnum(seq int, pnum int) error {
+	if px.dir == "" {
+		return nil
+	}
+	fullname := px.pnumDir() + "/seq-" + strconv.Itoa(seq)
+	tempname := px.pnumDir() + "/temp-" + strconv.Itoa(seq)
+	content := strconv.Itoa(pnum)
+	if err := ioutil.WriteFile(tempname, []byte(content), 0666); err != nil {
+		return err
+	}
+	if err := os.Rename(tempname, fullname); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (px *Paxos) fileReadPnum(seq int) (int, error) {
+	pn := 0
+	fullname := px.pnumDir() + "/seq-" + strconv.Itoa(seq)
+	content, err := ioutil.ReadFile(fullname)
+	if err == nil {
+		pn, _ = strconv.Atoi(string(content))
+	}
+	return pn, err
+}
+
+func (px *Paxos) fileReadPnums() map[int]int {
+	pnums := map[int]int{}
+	d := px.pnumDir()
+	files, err := ioutil.ReadDir(d)
+	if err != nil {
+		log.Fatalf("fileReadPnums could not read %v: %v", d, err)
+	}
+	for _, fi := range files {
+		n1 := fi.Name()
+		if n1[0:4] == "seq-" {
+			seq, err := strconv.Atoi(n1[4:])
+			if err != nil {
+				log.Fatalf("fileReadPnums bad file name %v: %v", n1, err)
+			}
+			pn, err := px.fileReadPnum(seq)
+			if err != nil {
+				log.Fatalf("fileReadPnums fileReadPnum failed for %v: %v", seq, err)
+			}
+			pnums[seq] = pn
+		}
+	}
+	return pnums
+}
 
 func (px *Paxos) Proposer(seq int, v interface{}) {
 
@@ -148,6 +362,7 @@ func (px *Paxos) Proposer(seq int, v interface{}) {
 		px.mu.Lock()
 		pn := (px.pnums[seq] / length + 1) * length + px.me
 		px.pnums[seq] = pn
+		px.fileWritePnum(seq, pn)
 		px.mu.Unlock()
 
 		var pv interface{}
@@ -186,6 +401,7 @@ func (px *Paxos) Proposer(seq int, v interface{}) {
 				px.mu.Lock()
 				if reply.Pnum > px.pnums[seq] {
 					px.pnums[seq] = reply.Pnum
+					px.fileWritePnum(seq, reply.Pnum)
 				}
 				px.mu.Unlock()
 			}
@@ -218,6 +434,7 @@ func (px *Paxos) Proposer(seq int, v interface{}) {
 					px.mu.Lock()
 					if reply.Pnum > px.pnums[seq] {
 						px.pnums[seq] = reply.Pnum
+						px.fileWritePnum(seq, reply.Pnum)
 					}
 					px.mu.Unlock()
 				}
@@ -233,9 +450,6 @@ func (px *Paxos) Proposer(seq int, v interface{}) {
 						px.Learner(args, &reply)
 					} else {
 						call(value, "Paxos.Learner", args, &reply)
-						//if call(value, "Paxos.Learner", args, &reply) {
-						//	px.doneInsts[index] = reply.Done
-						//}
 					}
 				}
 
@@ -260,23 +474,27 @@ func (px *Paxos) Acceptor(args *AcceptorArgs, reply *AcceptorReply) error {
 	if phase == "Prepare" {
 		if !ok {
 			px.instances[seq] = &AcceptorState{sendP.Num, Proposal{0, nil}, Pending}
+			px.fileWriteInstance(seq)
 		} else {
-			if sendP.Num > info.maxPrepare {
-				px.instances[seq].maxPrepare = sendP.Num
-				reply.AcceptP = info.acceptP
+			if sendP.Num > info.MaxPrepare {
+				px.instances[seq].MaxPrepare = sendP.Num
+				px.fileWriteInstance(seq)
+				reply.AcceptP = info.AcceptP
 			} else {
-				reply.Pnum = info.maxPrepare
+				reply.Pnum = info.MaxPrepare
 				return errors.New("prepare failed")
 			}
 		}
 	} else {	//Accept Phase
 		if !ok {
 			px.instances[seq] = &AcceptorState{sendP.Num, sendP, Pending}
-		} else if sendP.Num >= info.maxPrepare {
-			px.instances[seq].maxPrepare = sendP.Num
-			px.instances[seq].acceptP = sendP
+			px.fileWriteInstance(seq)
+		} else if sendP.Num >= info.MaxPrepare {
+			px.instances[seq].MaxPrepare = sendP.Num
+			px.instances[seq].AcceptP = sendP
+			px.fileWriteInstance(seq)
 		} else {
-			reply.Pnum = info.maxPrepare
+			reply.Pnum = info.MaxPrepare
 			return errors.New("accept failed")
 		}
 	}
@@ -293,16 +511,18 @@ func (px *Paxos) Learner(args *LearnerArgs, reply *LearnerReply) error {
 
 	if _, ok := px.instances[seq]; !ok {
 		px.instances[seq] = &AcceptorState{acceptP.Num, acceptP, Decided}
+		px.fileWriteInstance(seq)
 	} else {
-		if acceptP.Num > px.instances[seq].maxPrepare {
-			px.instances[seq].maxPrepare = acceptP.Num
+		if acceptP.Num > px.instances[seq].MaxPrepare {
+			px.instances[seq].MaxPrepare = acceptP.Num
+			px.fileWriteInstance(seq)
 		}
-		px.instances[seq].decided = Decided
-		px.instances[seq].acceptP = acceptP
+		px.instances[seq].Decided = Decided
+		px.instances[seq].AcceptP = acceptP
 	}
 
 	px.doneInsts[me] = done
-	//reply.Done = px.doneInsts[px.me]
+	px.fileWriteDone(me, done)
 
 	return nil
 }
@@ -332,6 +552,7 @@ func (px *Paxos) Done(seq int) {
 
 	if seq > px.doneInsts[px.me] {
 		px.doneInsts[px.me] = seq
+		px.fileWriteDone(px.me, seq)
 	}
 }
 
@@ -397,7 +618,7 @@ func (px *Paxos) Min() int {
 
 	for key, _ := range px.instances {
 		//Out-of-order instances
-		if key <= minDone && px.instances[key].decided == Decided {
+		if key <= minDone && px.instances[key].Decided == Decided {
 			delete(px.instances, key)
 			delete(px.pnums, key)
 		}
@@ -429,7 +650,7 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 		return Pending, nil
 	}
 
-	return px.instances[seq].decided, px.instances[seq].acceptP.Value
+	return px.instances[seq].Decided, px.instances[seq].AcceptP.Value
 }
 
 
@@ -471,24 +692,28 @@ func (px *Paxos) isunreliable() bool {
 // the ports of all the paxos peers (including this one)
 // are in peers[]. this servers port is peers[me].
 //
-func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
+func Make(peers []string, me int, rpcs *rpc.Server, dir string, restart bool) *Paxos {
 	px := &Paxos{}
 	px.peers = peers
 	px.me = me
-
+	px.dir = dir
 
 	// Your initialization code here.
-	px.instances = make(map[int]*AcceptorState)
-	px.doneInsts = make([]int, len(peers))
-	for i := 0; i < len(peers); i++ {
-		px.doneInsts[i] = -1
+	if restart {
+		px.instances = px.fileReadInsts()
+		//fmt.Printf("len: %d\n", len(px.instances))
+		//fmt.Printf("maxn: %d\n", px.instances[0].MaxPrepare)
+		//fmt.Printf("num: %d\n", px.instances[0].AcceptP.Num)
+		px.doneInsts = px.fileReadDones(len(peers))
+		px.pnums = px.fileReadPnums()
+	} else {
+		px.instances = make(map[int]*AcceptorState)
+		px.doneInsts = make([]int, len(peers))
+		for i := 0; i < len(peers); i++ {
+			px.doneInsts[i] = -1
+		}
+		px.pnums = make(map[int]int)
 	}
-	px.pnums = make(map[int]int)
-
-	//restart & read
-	px.instances = px.fileReadInsts()
-	px.doneInsts = px.fileReadDone(len(peers))
-	px.pnums = px.fileReadPnums()
 
 
 	if rpcs != nil {
