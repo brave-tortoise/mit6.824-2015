@@ -310,6 +310,69 @@ func (kv *DisKV) WaitForDecide(seq int) Op {
 	}
 }
 
+func (kv *DisKV) ApplyOp(decidedOp Op) Err {
+
+	var err Err
+
+	if decidedOp.OpType == "NullOp" {
+	} else if decidedOp.OpType == "Reconfig" {
+		for shard, data := range decidedOp.GetShards {
+			for k, v := range data {
+				kv.database[shard][k] = v
+			}
+			kv.fileReplaceShard(shard, data)
+		}
+
+		for client, lastOp := range decidedOp.GetRecOps {
+			lo, ok := kv.recOps[client]
+			if !ok || lastOp.OpSeq > lo.OpSeq {
+				kv.recOps[client] = lastOp
+				kv.fileWriteLastOp(client, lastOp)
+			}
+		}
+
+		kv.config = decidedOp.Config
+		kv.fileWriteConfig(kv.config)
+
+		//fmt.Printf("%d: %d, %s, %d, %d\n", kv.me, kv.seq, decidedOp.OpType, len(decidedOp.GetShards), len(decidedOp.GetRecOps))
+
+	} else {
+
+		opType, client, shard, key := decidedOp.OpType, decidedOp.Client, decidedOp.Shard, decidedOp.Key
+		err = OK
+		lastOp := LastOp{OpSeq:decidedOp.OpSeq}
+
+		if opType == "Get" {
+			if v, ok := kv.database[shard][key]; ok {
+				lastOp.Value = v
+			} else {
+				err = ErrNoKey
+			}
+		} else {
+			value := decidedOp.Value
+			if opType == "Append" {
+				value = kv.database[shard][key] + value
+				//fmt.Printf("%d: %d, %s, %d, %s, %d, %s\n", kv.me, kv.seq, opType, client, key, shard, value)
+			}
+			kv.database[shard][key] = value
+			kv.filePut(shard, key, value)
+		}
+
+		if err == OK {
+			kv.recOps[client] = lastOp
+			kv.fileWriteLastOp(client, lastOp)
+		}
+	}
+
+	//fmt.Printf("%d, %d\n", kv.me, kv.seq)
+
+	kv.px.Done(kv.seq)
+	kv.seq++
+	kv.fileWriteSeq(kv.seq)
+
+	return err
+}
+
 func (kv *DisKV) Propose(op Op) Err {
 
 	var err Err
@@ -341,61 +404,7 @@ func (kv *DisKV) Propose(op Op) Err {
 		}
 		decidedOp := decidedV.(Op)
 
-
-		if decidedOp.OpType == "NullOp" {
-		} else if decidedOp.OpType == "Reconfig" {
-			for shard, data := range decidedOp.GetShards {
-				for k, v := range data {
-					kv.database[shard][k] = v
-				}
-				kv.fileReplaceShard(shard, data)
-			}
-
-			for client, lastOp := range decidedOp.GetRecOps {
-				lo, ok := kv.recOps[client]
-				if !ok || lastOp.OpSeq > lo.OpSeq {
-					kv.recOps[client] = lastOp
-					kv.fileWriteLastOp(client, lastOp)
-				}
-			}
-
-			kv.config = decidedOp.Config
-			kv.fileWriteConfig(kv.config)
-
-			//fmt.Printf("%d: %d, %s, %d, %d\n", kv.me, kv.seq, decidedOp.OpType, len(decidedOp.GetShards), len(decidedOp.GetRecOps))
-
-		} else {
-
-			opType, client, shard, key := decidedOp.OpType, decidedOp.Client, decidedOp.Shard, decidedOp.Key
-			err = OK
-			lastOp := LastOp{OpSeq:decidedOp.OpSeq}
-
-			if opType == "Get" {
-				if v, ok := kv.database[shard][key]; ok {
-					lastOp.Value = v
-				} else {
-					err = ErrNoKey
-				}
-			} else {
-				value := decidedOp.Value
-				if opType == "Append" {
-					value = kv.database[shard][key] + value
-					//fmt.Printf("%d: %d, %s, %d, %s, %d, %s\n", kv.me, kv.seq, opType, client, key, shard, value)
-				}
-				kv.database[shard][key] = value
-				kv.filePut(shard, key, value)
-			}
-
-			if err == OK {
-				kv.recOps[client] = lastOp
-				kv.fileWriteLastOp(client, lastOp)
-			}
-
-		}
-
-		kv.px.Done(seq)
-		kv.seq++
-		kv.fileWriteSeq(kv.seq)
+		err = kv.ApplyOp(decidedOp)
 
 		if decidedOp.OpId == op.OpId {
 			break
@@ -502,6 +511,16 @@ func (kv *DisKV) tick() {
 		op := Op{OpId:nrand(), OpType:"NullOp"}
 		kv.Propose(op)
 		kv.restart = false
+	}
+
+	for {
+		seq := kv.seq
+		state, decidedV := kv.px.Status(seq)
+		if state != paxos.Decided {
+			break
+		}
+		decidedOp := decidedV.(Op)
+		kv.ApplyOp(decidedOp)
 	}
 
 	cfgNum := kv.config.Num

@@ -131,7 +131,7 @@ func (px *Paxos) instanceDir() string {
 	return d
 }
 
-func (px *Paxos) encodeAcceptP(acceptP AcceptorState) string {
+func (px *Paxos) encodeAcceptP(info AcceptorState) string {
 	w := new(bytes.Buffer)
 	e := gob.NewEncoder(w)
 	/*fmt.Println("1connection pointer is", acceptP)
@@ -140,7 +140,7 @@ func (px *Paxos) encodeAcceptP(acceptP AcceptorState) string {
 	strPointerHex := fmt.Sprintf("%p", unsafe.Pointer(acceptP))
     fmt.Println("1connection is", strPointerHex)
 	e.Encode(strPointerInt)*/
-	e.Encode(acceptP)
+	e.Encode(info)
 	return string(w.Bytes())
 }
 
@@ -157,9 +157,9 @@ func (px *Paxos) decodeAcceptP(buf string) AcceptorState {
 	fmt.Println("2connection pointer is", acceptP)
 	debugMsg := fmt.Sprintf("%p", unsafe.Pointer(acceptP))
     fmt.Println("debugMsg is", debugMsg)*/
-	var acceptP AcceptorState
-	d.Decode(&acceptP)
-	return acceptP
+	var info AcceptorState
+	d.Decode(&info)
+	return info
 }
 
 func (px *Paxos) fileWriteInstance(seq int) error {
@@ -180,13 +180,13 @@ func (px *Paxos) fileWriteInstance(seq int) error {
 }
 
 func (px *Paxos) fileReadInstance(seq int) (AcceptorState, error) {
-	acceptP := AcceptorState{}
+	info := AcceptorState{}
 	fullname := px.instanceDir() + "/seq-" + strconv.Itoa(seq)
 	content, err := ioutil.ReadFile(fullname)
 	if err == nil {
-		acceptP = px.decodeAcceptP(string(content))
+		info = px.decodeAcceptP(string(content))
 	}
-	return acceptP, err
+	return info, err
 }
 
 func (px *Paxos) fileReadInsts() map[int]*AcceptorState {
@@ -203,16 +203,22 @@ func (px *Paxos) fileReadInsts() map[int]*AcceptorState {
 			if err != nil {
 				log.Fatalf("fileReadInsts bad file name %v: %v", n1, err)
 			}
-			acceptP, err := px.fileReadInstance(seq)
+			info, err := px.fileReadInstance(seq)
 			if err != nil {
 				log.Fatalf("fileReadInsts fileReadInstance failed for %v: %v", seq, err)
 			}
-			instances[seq] = &acceptP
-			//fmt.Println(acceptP)
+			instances[seq] = &info
 		}
 	}
 	return instances
 }
+
+func (px *Paxos) fileDeleteInstance(seq int) {
+	//fmt.Printf("%d: delete %d\n", px.me, seq)
+	fullname := px.instanceDir() + "/seq-" + strconv.Itoa(seq)
+	os.Remove(fullname)
+}
+
 
 func (px *Paxos) doneDir() string {
 	d := px.dir + "/dones/"
@@ -441,15 +447,20 @@ func (px *Paxos) Proposer(seq int, v interface{}) {
 			}
 
 			if resp > length / 2 {
-
-				args := &LearnerArgs{seq, sendP, px.me, px.doneInsts[px.me]}
-				var reply LearnerReply
-
 				for index, value := range px.peers {
+					args := &LearnerArgs{seq, sendP, px.doneInsts}
+					var reply LearnerReply
 					if index == px.me {
 						px.Learner(args, &reply)
 					} else {
-						call(value, "Paxos.Learner", args, &reply)
+						if call(value, "Paxos.Learner", args, &reply) {
+							px.mu.Lock()
+							if reply.Done > px.doneInsts[index] {
+								px.doneInsts[index] = reply.Done
+								px.fileWriteDone(index, reply.Done)
+							}
+							px.mu.Unlock()
+						}
 					}
 				}
 
@@ -507,7 +518,7 @@ func (px *Paxos) Learner(args *LearnerArgs, reply *LearnerReply) error {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
-	seq, acceptP, me, done := args.Seq, args.AcceptP, args.Me, args.Done
+	seq, acceptP := args.Seq, args.AcceptP
 
 	if _, ok := px.instances[seq]; !ok {
 		px.instances[seq] = &AcceptorState{acceptP.Num, acceptP, Decided}
@@ -521,8 +532,15 @@ func (px *Paxos) Learner(args *LearnerArgs, reply *LearnerReply) error {
 		px.instances[seq].AcceptP = acceptP
 	}
 
-	px.doneInsts[me] = done
-	px.fileWriteDone(me, done)
+	px.fileWriteInstance(seq)
+
+	for key, value := range args.DoneInsts {
+		if value > px.doneInsts[key] {
+			px.doneInsts[key] = value
+			px.fileWriteDone(key, value)
+		}
+	}
+	reply.Done = px.doneInsts[px.me]
 
 	return nil
 }
@@ -554,6 +572,8 @@ func (px *Paxos) Done(seq int) {
 		px.doneInsts[px.me] = seq
 		px.fileWriteDone(px.me, seq)
 	}
+
+	//fmt.Printf("done: %d\n", seq)
 }
 
 //
@@ -620,9 +640,12 @@ func (px *Paxos) Min() int {
 		//Out-of-order instances
 		if key <= minDone && px.instances[key].Decided == Decided {
 			delete(px.instances, key)
+			px.fileDeleteInstance(key)
 			delete(px.pnums, key)
 		}
 	}
+
+	//fmt.Printf("min: %d, %d\n", px.me, minDone)
 
 	return (minDone + 1)
 }

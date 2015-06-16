@@ -8,8 +8,6 @@ type Proposal struct {
 type AcceptorState struct {
 	MaxPrepare	int
 	AcceptP		Proposal
-	//Num			int
-	//Value		interface{}
 	Decided		Fate
 }
 
@@ -27,9 +25,10 @@ type AcceptorReply struct {
 type LearnerArgs struct {
 	Seq			int
 	AcceptP		Proposal
-	Me			int
-	Done		int
+	//Me			int
+	DoneInsts	[]int
 }
 
 type LearnerReply struct {
+	Done		int
 }

@@ -477,7 +477,7 @@ func Test4ConcurrentUnreliable(t *testing.T) {
 //
 // the rest of the tests are lab5-specific.
 //
-
+/*
 //
 // do the servers write k/v pairs to disk, so that they
 // are still available after kill+restart?
@@ -648,10 +648,13 @@ func Test5DiskUse(t *testing.T) {
 
 	{
 		nb := tc.space()
+		//fmt.Printf("%v\n", nb)
 		if nb > max {
 			t.Fatalf("using too many bytes on disk (%v)", nb)
 		}
 	}
+
+	//fmt.Printf("  ... Passed1\n")
 
 	for i := 0; i < len(g0.servers); i++ {
 		tc.kill1(0, i, false)
@@ -663,6 +666,8 @@ func Test5DiskUse(t *testing.T) {
 			t.Fatalf("using too many bytes on disk (%v > %v)", nb, max)
 		}
 	}
+
+	//fmt.Printf("  ... Passed2\n")
 
 	for i := 0; i < len(g0.servers); i++ {
 		tc.start1(0, i)
@@ -787,7 +792,7 @@ func Test5AppendUse(t *testing.T) {
 
 	fmt.Printf("  ... Passed\n")
 }
-
+*/
 //
 // recovery if a single replica loses disk content.
 //
@@ -819,6 +824,8 @@ func Test5OneLostDisk(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	ck.Get(k2)
 
+	fmt.Printf("  ... Passed0\n")
+
 	for i := 0; i < len(g0.servers); i++ {
 		k1x := ck.Get(k1)
 		if k1x != k1v {
@@ -828,6 +835,8 @@ func Test5OneLostDisk(t *testing.T) {
 		if k2x != k2v {
 			t.Fatalf("wrong value for k2")
 		}
+
+		fmt.Printf("  ... Passed1\n")
 
 		tc.kill1(0, i, true)
 		time.Sleep(1 * time.Second)
@@ -841,7 +850,11 @@ func Test5OneLostDisk(t *testing.T) {
 			ck.Put(k2, k2v)
 		}
 
+		fmt.Printf("  ... Passed2\n")
+
 		tc.start1(0, i)
+
+		fmt.Printf("  ... Passed3\n")
 
 		{
 			z := randstring(10)
@@ -853,6 +866,8 @@ func Test5OneLostDisk(t *testing.T) {
 			k1v += z
 			ck.Append(k1, z)
 		}
+
+		fmt.Printf("  ... Passed4\n")
 
 		time.Sleep(2 * time.Second)
 	}
