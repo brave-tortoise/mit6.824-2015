@@ -4,7 +4,7 @@ import "testing"
 import "shardmaster"
 import "runtime"
 import "strconv"
-//import "strings"
+import "strings"
 import "os"
 import "os/exec"
 import "time"
@@ -12,11 +12,11 @@ import "fmt"
 //import "sync"
 import "io/ioutil"
 import "log"
-import "math/rand"
+//import "math/rand"
 import crand "crypto/rand"
 import "encoding/base64"
 import "path/filepath"
-//import "sync/atomic"
+import "sync/atomic"
 
 type tServer struct {
 	p       *os.Process
@@ -792,7 +792,7 @@ func Test5AppendUse(t *testing.T) {
 
 	fmt.Printf("  ... Passed\n")
 }
-*/
+
 //
 // recovery if a single replica loses disk content.
 //
@@ -824,8 +824,6 @@ func Test5OneLostDisk(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	ck.Get(k2)
 
-	fmt.Printf("  ... Passed0\n")
-
 	for i := 0; i < len(g0.servers); i++ {
 		k1x := ck.Get(k1)
 		if k1x != k1v {
@@ -835,8 +833,6 @@ func Test5OneLostDisk(t *testing.T) {
 		if k2x != k2v {
 			t.Fatalf("wrong value for k2")
 		}
-
-		fmt.Printf("  ... Passed1\n")
 
 		tc.kill1(0, i, true)
 		time.Sleep(1 * time.Second)
@@ -850,11 +846,7 @@ func Test5OneLostDisk(t *testing.T) {
 			ck.Put(k2, k2v)
 		}
 
-		fmt.Printf("  ... Passed2\n")
-
 		tc.start1(0, i)
-
-		fmt.Printf("  ... Passed3\n")
 
 		{
 			z := randstring(10)
@@ -866,8 +858,6 @@ func Test5OneLostDisk(t *testing.T) {
 			k1v += z
 			ck.Append(k1, z)
 		}
-
-		fmt.Printf("  ... Passed4\n")
 
 		time.Sleep(2 * time.Second)
 	}
@@ -967,8 +957,8 @@ func Test5OneLostOneDown(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	ck.Put("a", "c")
 	if ck.Get(k1) != k1v {
-		fmt.Println(ck.Get(k1))
-		fmt.Println(k1v)
+		//fmt.Println(ck.Get(k1))
+		//fmt.Println(k1v)
 		t.Fatalf("wrong value for k1")
 	}
 	if ck.Get(k2) != k2v {
@@ -977,8 +967,8 @@ func Test5OneLostOneDown(t *testing.T) {
 
 	fmt.Printf("  ... Passed\n")
 }
+*/
 
-/*
 // check that all known appends are present in a value,
 // and are in order for each concurrent client.
 func checkAppends(t *testing.T, v string, counts []int) {
@@ -1098,7 +1088,7 @@ func Test5ConcurrentCrashReliable(t *testing.T) {
 	doConcurrentCrash(t, false)
 	fmt.Printf("  ... Passed\n")
 }
-
+/*
 //
 // Append() at same time as crash.
 //

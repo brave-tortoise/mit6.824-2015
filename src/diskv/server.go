@@ -507,11 +507,11 @@ func (kv *DisKV) tick() {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	if kv.restart {
-		op := Op{OpId:nrand(), OpType:"NullOp"}
-		kv.Propose(op)
-		kv.restart = false
-	}
+	//if kv.restart {
+	//	op := Op{OpId:nrand(), OpType:"NullOp"}
+	//	kv.Propose(op)
+	//	kv.restart = false
+	//}
 
 	for {
 		seq := kv.seq
@@ -528,6 +528,41 @@ func (kv *DisKV) tick() {
 
 	if newCfg.Num == cfgNum + 1 {
 		kv.ReConfig(newCfg)
+	}
+}
+
+func (kv *DisKV) GatherState(args *SyncArgs, reply *SyncReply) error {
+
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	reply.Database = kv.database
+	reply.Seq = kv.seq
+	reply.RecOps = kv.recOps
+	reply.Config = kv.config
+
+	return nil
+}
+
+func (kv *DisKV) SyncState(servers []string) {
+
+	args := SyncArgs{}
+	var reply SyncReply
+	for _, sv := range servers {
+		if call(sv, "DisKV.GatherState", args, &reply) {
+			if reply.Seq > kv.seq {
+				for i := 0; i < shardmaster.NShards; i++ {
+					for key, value := range reply.Database[i] {
+						kv.database[i][key] = value
+					}
+				}
+				for client, lastOp := range reply.RecOps {
+					kv.recOps[client] = lastOp
+				}
+				kv.seq = reply.Seq
+				kv.config = reply.Config
+			}
+		}
 	}
 }
 
@@ -604,6 +639,13 @@ func StartServer(gid int64, shardmasters []string,
 		//fmt.Printf("read: %d, %d\n", kv.me, kv.seq)
 		kv.recOps = kv.fileReadRecOps()
 		kv.restart = true
+
+		//copy data from other replicas
+		//if kv.seq == 0 {
+			//fmt.Printf("%d\n", kv.me)
+			kv.SyncState(servers)
+		//}
+
 		//go func() {
 		//	op := Op{OpId:nrand(), OpType:"NullOp"}
 		//	kv.Propose(op)

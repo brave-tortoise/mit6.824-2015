@@ -25,7 +25,6 @@ type AcceptorReply struct {
 type LearnerArgs struct {
 	Seq			int
 	AcceptP		Proposal
-	//Me			int
 	DoneInsts	[]int
 }
 
