@@ -69,3 +69,14 @@ type SyncReply struct {
 	RecOps		map[int64]LastOp
 	Config		shardmaster.Config
 }
+
+//type SyncPaxosArgs struct {
+//	MinDone		int
+//}
+//
+//type SyncPaxosReply struct {
+//	MinDone		int
+//	Instances	map[int]paxos.AcceptorState
+//	DoneInsts	[]int
+//	Pnums		map[int]int
+//}

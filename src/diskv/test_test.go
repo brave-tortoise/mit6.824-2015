@@ -9,10 +9,10 @@ import "os"
 import "os/exec"
 import "time"
 import "fmt"
-//import "sync"
+import "sync"
 import "io/ioutil"
 import "log"
-//import "math/rand"
+import "math/rand"
 import crand "crypto/rand"
 import "encoding/base64"
 import "path/filepath"
@@ -234,7 +234,7 @@ func setup(t *testing.T, tag string, ngroups int, nreplicas int, unreliable bool
 //
 // these tests are the same as in Lab 4.
 //
-/*
+
 func Test4Basic(t *testing.T) {
 	tc := setup(t, "basic", 3, 3, false)
 	defer tc.cleanup()
@@ -473,11 +473,11 @@ func Test4ConcurrentUnreliable(t *testing.T) {
 	doConcurrent(t, true)
 	fmt.Printf("  ... Passed\n")
 }
-*/
+
 //
 // the rest of the tests are lab5-specific.
 //
-/*
+
 //
 // do the servers write k/v pairs to disk, so that they
 // are still available after kill+restart?
@@ -967,7 +967,7 @@ func Test5OneLostOneDown(t *testing.T) {
 
 	fmt.Printf("  ... Passed\n")
 }
-*/
+
 
 // check that all known appends are present in a value,
 // and are in order for each concurrent client.
@@ -1088,7 +1088,7 @@ func Test5ConcurrentCrashReliable(t *testing.T) {
 	doConcurrentCrash(t, false)
 	fmt.Printf("  ... Passed\n")
 }
-/*
+
 //
 // Append() at same time as crash.
 //
@@ -1129,6 +1129,7 @@ func Test5Simultaneous(t *testing.T) {
 		vx := ck.Get(k1)
 		checkAppends(t, vx, counts)
 		tc.start1(0, i%3)
+
 		time.Sleep(1000 * time.Millisecond)
 
 		z := <-ch
@@ -1286,4 +1287,4 @@ func Test5RejoinMix3(t *testing.T) {
 	}
 
 	fmt.Printf("  ... Passed\n")
-}*/
+}

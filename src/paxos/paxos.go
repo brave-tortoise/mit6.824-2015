@@ -285,7 +285,7 @@ func (px *Paxos) fileReadDones(num int) []int {
 	}
 	return doneInsts
 }
-
+/*
 func (px *Paxos) pnumDir() string {
 	d := px.dir + "/pnums/"
 	// create directory if needed
@@ -347,7 +347,7 @@ func (px *Paxos) fileReadPnums() map[int]int {
 	}
 	return pnums
 }
-
+*/
 func (px *Paxos) Proposer(seq int, v interface{}) {
 
 	for !px.isdead() {
@@ -368,7 +368,7 @@ func (px *Paxos) Proposer(seq int, v interface{}) {
 		px.mu.Lock()
 		pn := (px.pnums[seq] / length + 1) * length + px.me
 		px.pnums[seq] = pn
-		px.fileWritePnum(seq, pn)
+		//px.fileWritePnum(seq, pn)
 		px.mu.Unlock()
 
 		var pv interface{}
@@ -407,7 +407,7 @@ func (px *Paxos) Proposer(seq int, v interface{}) {
 				px.mu.Lock()
 				if reply.Pnum > px.pnums[seq] {
 					px.pnums[seq] = reply.Pnum
-					px.fileWritePnum(seq, reply.Pnum)
+					//px.fileWritePnum(seq, reply.Pnum)
 				}
 				px.mu.Unlock()
 			}
@@ -440,7 +440,7 @@ func (px *Paxos) Proposer(seq int, v interface{}) {
 					px.mu.Lock()
 					if reply.Pnum > px.pnums[seq] {
 						px.pnums[seq] = reply.Pnum
-						px.fileWritePnum(seq, reply.Pnum)
+						//px.fileWritePnum(seq, reply.Pnum)
 					}
 					px.mu.Unlock()
 				}
@@ -473,6 +473,7 @@ func (px *Paxos) Proposer(seq int, v interface{}) {
 func (px *Paxos) Acceptor(args *AcceptorArgs, reply *AcceptorReply) error {
 
 	if args.Seq < px.myMin() {
+		//fmt.Printf("%d: forgotten %d < %d\n", px.me, args.Seq, px.myMin())
 		return errors.New("instance forgotten")
 	}
 
@@ -485,11 +486,11 @@ func (px *Paxos) Acceptor(args *AcceptorArgs, reply *AcceptorReply) error {
 	if phase == "Prepare" {
 		if !ok {
 			px.instances[seq] = &AcceptorState{sendP.Num, Proposal{0, nil}, Pending}
-			px.fileWriteInstance(seq)
+			//px.fileWriteInstance(seq)
 		} else {
 			if sendP.Num > info.MaxPrepare {
 				px.instances[seq].MaxPrepare = sendP.Num
-				px.fileWriteInstance(seq)
+				//px.fileWriteInstance(seq)
 				reply.AcceptP = info.AcceptP
 			} else {
 				reply.Pnum = info.MaxPrepare
@@ -499,11 +500,11 @@ func (px *Paxos) Acceptor(args *AcceptorArgs, reply *AcceptorReply) error {
 	} else {	//Accept Phase
 		if !ok {
 			px.instances[seq] = &AcceptorState{sendP.Num, sendP, Pending}
-			px.fileWriteInstance(seq)
+			//px.fileWriteInstance(seq)
 		} else if sendP.Num >= info.MaxPrepare {
 			px.instances[seq].MaxPrepare = sendP.Num
 			px.instances[seq].AcceptP = sendP
-			px.fileWriteInstance(seq)
+			//px.fileWriteInstance(seq)
 		} else {
 			reply.Pnum = info.MaxPrepare
 			return errors.New("accept failed")
@@ -522,11 +523,9 @@ func (px *Paxos) Learner(args *LearnerArgs, reply *LearnerReply) error {
 
 	if _, ok := px.instances[seq]; !ok {
 		px.instances[seq] = &AcceptorState{acceptP.Num, acceptP, Decided}
-		px.fileWriteInstance(seq)
 	} else {
 		if acceptP.Num > px.instances[seq].MaxPrepare {
 			px.instances[seq].MaxPrepare = acceptP.Num
-			px.fileWriteInstance(seq)
 		}
 		px.instances[seq].Decided = Decided
 		px.instances[seq].AcceptP = acceptP
@@ -676,7 +675,56 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	return px.instances[seq].Decided, px.instances[seq].AcceptP.Value
 }
 
+func (px *Paxos) GatherState(args *SyncArgs, reply *SyncReply) error {
 
+	//fmt.Printf("%d: gather paxos\n", px.me)
+
+	//minDone := px.myMin()
+    //if minDone <= args.MinDone {
+    //    return errors.New("too old")
+    //}
+
+    px.mu.Lock()
+    defer px.mu.Unlock()
+
+	//fmt.Println("gather paxos end")
+
+	//reply.MinDone = minDone
+	reply.Instances = map[int]Proposal{}
+    for key, value := range px.instances {
+		reply.Instances[key] = value.AcceptP
+    }
+    reply.DoneInsts = px.doneInsts
+    //reply.Pnums = px.pnums
+
+	return nil
+}
+
+func (px *Paxos) SyncState(peers []string) {
+
+	//minDone := px.myMin()
+	args := SyncArgs{}
+	var reply SyncReply
+	for {
+		for idx, sv := range peers {
+			if idx == px.me {
+				continue
+			}
+		    if call(sv, "Paxos.GatherState", args, &reply) {
+				if reply.DoneInsts[px.me] > px.doneInsts[px.me] {
+					//minDone = reply.MinDone
+					for key, value := range reply.Instances {
+						px.instances[key] = &AcceptorState{0, value, Decided}
+		            }
+		            for index, value := range reply.DoneInsts {
+						px.doneInsts[index] = value
+		            }
+				}
+				return
+			}
+		}
+	}
+}
 
 //
 // tell the peer to shut itself down.
@@ -724,19 +772,20 @@ func Make(peers []string, me int, rpcs *rpc.Server, dir string, restart bool) *P
 	// Your initialization code here.
 	if restart {
 		px.instances = px.fileReadInsts()
-		//fmt.Printf("len: %d\n", len(px.instances))
-		//fmt.Printf("maxn: %d\n", px.instances[0].MaxPrepare)
-		//fmt.Printf("num: %d\n", px.instances[0].AcceptP.Num)
 		px.doneInsts = px.fileReadDones(len(peers))
-		px.pnums = px.fileReadPnums()
+		//px.pnums = px.fileReadPnums()
+		if px.doneInsts[px.me] == -1 {
+			px.SyncState(peers)
+		}
 	} else {
 		px.instances = make(map[int]*AcceptorState)
 		px.doneInsts = make([]int, len(peers))
 		for i := 0; i < len(peers); i++ {
 			px.doneInsts[i] = -1
 		}
-		px.pnums = make(map[int]int)
 	}
+
+	px.pnums = make(map[int]int)
 
 
 	if rpcs != nil {

@@ -31,3 +31,11 @@ type LearnerArgs struct {
 type LearnerReply struct {
 	Done		int
 }
+
+type SyncArgs struct {
+}
+
+type SyncReply struct {
+	Instances   map[int]Proposal
+	DoneInsts   []int
+}

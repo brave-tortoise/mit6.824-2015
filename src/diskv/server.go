@@ -17,6 +17,7 @@ import "shardmaster"
 import "io/ioutil"
 import "strconv"
 import "bytes"
+//import "errors"
 
 
 const Debug = 0
@@ -507,11 +508,13 @@ func (kv *DisKV) tick() {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	//if kv.restart {
-	//	op := Op{OpId:nrand(), OpType:"NullOp"}
-	//	kv.Propose(op)
-	//	kv.restart = false
-	//}
+	//fmt.Printf("%d: tick\n", kv.me)
+
+	if kv.restart {
+		op := Op{OpId:nrand(), OpType:"NullOp"}
+		kv.Propose(op)
+		kv.restart = false
+	}
 
 	for {
 		seq := kv.seq
@@ -533,34 +536,61 @@ func (kv *DisKV) tick() {
 
 func (kv *DisKV) GatherState(args *SyncArgs, reply *SyncReply) error {
 
+	//fmt.Println("gather data")
+
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
+
+	//fmt.Println("gather data end")
+
+	//if kv.seq <= args.Seq {
+		//fmt.Printf("gather: %d, %d\n", kv.me, kv.seq)
+	//	return errors.New("too old")
+	//}
 
 	reply.Database = kv.database
 	reply.Seq = kv.seq
 	reply.RecOps = kv.recOps
 	reply.Config = kv.config
 
+	//reply.Instances = map[int]paxos.AcceptorState{}
+	//for key, value := range kv.px.instances {
+	//	reply.Instances[key] = *value
+	//}
+	//reply.DoneInsts = kv.px.doneInsts
+	//reply.Pnums = kv.px.pnums
+
 	return nil
 }
 
 func (kv *DisKV) SyncState(servers []string) {
 
-	args := SyncArgs{}
 	var reply SyncReply
-	for _, sv := range servers {
-		if call(sv, "DisKV.GatherState", args, &reply) {
-			if reply.Seq > kv.seq {
-				for i := 0; i < shardmaster.NShards; i++ {
-					for key, value := range reply.Database[i] {
-						kv.database[i][key] = value
+	args := SyncArgs{}
+	for {
+		for idx, sv := range servers {
+			if idx == kv.me {
+				continue
+			}
+			if call(sv, "DisKV.GatherState", args, &reply) {
+				if reply.Seq > kv.seq {
+					for i := 0; i < shardmaster.NShards; i++ {
+						for key, value := range reply.Database[i] {
+							kv.database[i][key] = value
+						}
+						kv.fileReplaceShard(i, reply.Database[i])
 					}
+					for client, lastOp := range reply.RecOps {
+						kv.recOps[client] = lastOp
+						kv.fileWriteLastOp(client, lastOp)
+					}
+
+					kv.seq = reply.Seq
+					kv.fileWriteSeq(kv.seq)
+					kv.config = reply.Config
+					kv.fileWriteConfig(kv.config)
 				}
-				for client, lastOp := range reply.RecOps {
-					kv.recOps[client] = lastOp
-				}
-				kv.seq = reply.Seq
-				kv.config = reply.Config
+				return
 			}
 		}
 	}
@@ -638,18 +668,20 @@ func StartServer(gid int64, shardmasters []string,
 		kv.seq = kv.fileReadSeq()
 		//fmt.Printf("read: %d, %d\n", kv.me, kv.seq)
 		kv.recOps = kv.fileReadRecOps()
-		kv.restart = true
+		//kv.restart = true
 
 		//copy data from other replicas
-		//if kv.seq == 0 {
-			//fmt.Printf("%d\n", kv.me)
+		if kv.seq == 0 {
+		//	fmt.Printf("%d: syncdata\n", kv.me)
 			kv.SyncState(servers)
-		//}
-
-		//go func() {
-		//	op := Op{OpId:nrand(), OpType:"NullOp"}
-		//	kv.Propose(op)
-		//}()
+		//	fmt.Printf("%d: syncdata end\n", kv.me)
+		} else {
+			kv.restart = true
+			//go func() {
+			//	op := Op{OpId:nrand(), OpType:"NullOp"}
+			//	kv.Propose(op)
+			//}()
+		}
 	} else {
 		for i := 0; i < shardmaster.NShards; i++ {
 			kv.database[i] = make(map[string]string)
